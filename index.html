@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Invoice Settlement DApp</title>
+<script src="https://cdn.jsdelivr.net/npm/ethers@6.13.4/dist/ethers.umd.min.js"></script>
+<style>
+  :root { --bg:#f5f7fb; --card:#fff; --ink:#1d2433; --mute:#667085; --line:#e4e7ec; --pri:#2f5bea; --ok:#12805c; --bad:#c0362c; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:15px/1.5 system-ui,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--ink); }
+  main { max-width:920px; margin:0 auto; padding:24px 16px 60px; }
+  h1 { font-size:22px; margin:0 0 4px; } h2 { font-size:16px; margin:0 0 12px; }
+  .sub { color:var(--mute); margin-bottom:20px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; margin-bottom:16px; }
+  .grid { display:grid; gap:10px; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); }
+  label { display:block; font-size:12px; color:var(--mute); margin-bottom:3px; }
+  input { width:100%; padding:9px 10px; border:1px solid var(--line); border-radius:8px; font:inherit; }
+  button { padding:9px 14px; border:0; border-radius:8px; background:var(--pri); color:#fff; font:inherit; cursor:pointer; }
+  button.sec { background:#eef2ff; color:var(--pri); }
+  button:disabled { opacity:.5; cursor:not-allowed; }
+  .row { display:flex; gap:10px; align-items:end; flex-wrap:wrap; }
+  .row > div { flex:1; min-width:160px; }
+  .tag { display:inline-block; padding:2px 9px; border-radius:99px; font-size:12px; background:#eef2ff; color:var(--pri); }
+  .tag.ok { background:#e6f6ef; color:var(--ok); } .tag.bad { background:#fdecea; color:var(--bad); }
+  table { width:100%; border-collapse:collapse; font-size:13.5px; }
+  th,td { text-align:left; padding:8px 6px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--mute); font-weight:500; }
+  .mono { font-family:ui-monospace,Menlo,Consolas,monospace; font-size:12.5px; word-break:break-all; }
+  #log { white-space:pre-wrap; font-size:13px; padding:10px; border-radius:8px; background:#f2f4f7; min-height:42px; }
+  #log.err { background:#fdecea; color:var(--bad); } #log.good { background:#e6f6ef; color:var(--ok); }
+  .pay { margin:4px 0 0 0; padding-left:16px; color:var(--mute); font-size:12.5px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Invoice Settlement DApp</h1>
+  <div class="sub">Doanh nghiệp phát hành hóa đơn – khách hàng thanh toán nhiều đợt bằng ETH – công nợ minh bạch trên blockchain.</div>
+
+  <div class="card">
+    <h2>1. Kết nối</h2>
+    <div class="row">
+      <div><button id="btnConnect">Kết nối MetaMask</button></div>
+      <div style="flex:3"><label>Địa chỉ contract (sau khi deploy)</label><input id="contractAddr" placeholder="0x..."></div>
+      <div><button class="sec" id="btnLoad">Tải dữ liệu</button></div>
+    </div>
+    <p id="who" class="mono" style="margin:10px 0 0"></p>
+  </div>
+
+  <div class="card">
+    <h2>2. Doanh nghiệp: phát hành hóa đơn <span style="font-weight:400;color:var(--mute)">(createInvoice – chỉ ví owner)</span></h2>
+    <div class="grid">
+      <div><label>Mã hóa đơn (số nguyên, duy nhất)</label><input id="cId" type="number" min="1" value="1"></div>
+      <div><label>Ví khách hàng</label><input id="cCustomer" placeholder="0x..."></div>
+      <div><label>Số tiền (ETH)</label><input id="cAmount" value="0.3"></div>
+    </div>
+    <p><button id="btnCreate">Tạo hóa đơn</button></p>
+  </div>
+
+  <div class="card">
+    <h2>3. Khách hàng: thanh toán <span style="font-weight:400;color:var(--mute)">(payInvoice – chỉ ví khách hàng của hóa đơn)</span></h2>
+    <div class="grid">
+      <div><label>Mã hóa đơn</label><input id="pId" type="number" min="1" value="1"></div>
+      <div><label>Số tiền trả đợt này (ETH)</label><input id="pAmount" value="0.1"></div>
+    </div>
+    <p><button id="btnPay">Thanh toán</button></p>
+  </div>
+
+  <div class="card">
+    <h2>4. Tra cứu công nợ <span style="font-weight:400;color:var(--mute)">(getInvoiceBalance, isInvoicePaid – chỉ đọc, không tốn gas)</span></h2>
+    <div class="row">
+      <div><label>Mã hóa đơn</label><input id="qId" type="number" min="1" value="1"></div>
+      <div><button class="sec" id="btnQuery">Tra cứu</button></div>
+    </div>
+    <p id="qOut" style="margin:10px 0 0"></p>
+  </div>
+
+  <div class="card">
+    <h2>5. Danh sách hóa đơn & các khoản đã trả</h2>
+    <table>
+      <thead><tr><th>Mã</th><th>Khách hàng</th><th>Tổng</th><th>Đã trả</th><th>Còn nợ</th><th>Trạng thái</th><th>Các khoản đã trả</th></tr></thead>
+      <tbody id="tbody"><tr><td colspan="7" style="color:var(--mute)">Chưa có dữ liệu.</td></tr></tbody>
+    </table>
+  </div>
+
+  <div class="card"><h2>Nhật ký giao dịch</h2><div id="log">Chưa có hoạt động.</div></div>
+</main>
+
+<script>
+// ABI = "bản mô tả giao diện" của contract: cho ethers biết có hàm nào, tham số gì.
+const ABI = [
+  "function owner() view returns (address)",
+  "function createInvoice(uint256 invoiceId, address customer, uint256 amount)",
+  "function payInvoice(uint256 invoiceId) payable",
+  "function getInvoiceBalance(uint256 invoiceId) view returns (uint256)",
+  "function isInvoicePaid(uint256 invoiceId) view returns (bool)",
+  "function getInvoice(uint256 invoiceId) view returns (address customer, uint256 totalAmount, uint256 paidAmount, uint256 remaining, bool isPaid)",
+  "function getPayments(uint256 invoiceId) view returns (tuple(address payer, uint256 amount, uint256 timestamp)[])",
+  "function getInvoiceIds() view returns (uint256[])"
+];
+
+const $ = id => document.getElementById(id);
+let provider, signer, account, contract;
+// Mạng mà DApp chạy trên đó: 1337 = Ganache local. Nếu dùng Sepolia, đổi thành 11155111n.
+const EXPECTED_CHAIN_ID = 1337n;
+// RPC dùng để mô phỏng giao dịch lấy lý do lỗi. Ganache local: http://127.0.0.1:8545 (để "" nếu không dùng).
+const READ_RPC = "http://127.0.0.1:8545";
+
+function log(msg, kind) { const l = $("log"); l.textContent = msg; l.className = kind || ""; }
+function eth(wei) { return ethers.formatEther(wei) + " ETH"; }
+function short(a) { return a.slice(0, 6) + "…" + a.slice(-4); }
+
+// Lấy thông báo lỗi "require(...)" mà contract trả về để hiển thị cho người dùng.
+function reason(e) {
+  const d = (e.info && e.info.error && e.info.error.data) || (e.error && e.error.data);
+  if (d && d.reason) return d.reason;
+  if (e.revert && e.revert.args && e.revert.args[0]) return e.revert.args[0];
+  if (e.reason && !/missing revert/i.test(e.reason)) return e.reason;
+  return e.shortMessage || e.message;
+}
+
+// MetaMask thường che lý do revert ("Internal JSON-RPC error"). Vì vậy, trước khi gửi giao dịch thật,
+// ta "chạy thử" hàm (staticCall = mô phỏng, không tốn gas, không đổi dữ liệu) qua RPC trực tiếp để lấy
+// đúng thông báo require(...) của contract. Nếu mô phỏng thất bại thì không gửi giao dịch.
+let reader;
+async function simulate(method, args, overrides) {
+  if (!reader) return;
+  await reader[method].staticCall(...args, Object.assign({ from: account }, overrides || {}));
+}
+
+async function connect() {
+  if (!window.ethereum) return log("Không thấy MetaMask. Hãy cài extension MetaMask.", "err");
+  provider = new ethers.BrowserProvider(window.ethereum);   // cầu nối web <-> ví
+  await provider.send("eth_requestAccounts", []);            // hiện popup xin quyền
+  // Nếu ví đang ở mạng khác mạng local (chainId 1337), xin ví chuyển sang đúng mạng.
+  const cur = await provider.getNetwork();
+  if (cur.chainId !== EXPECTED_CHAIN_ID) {
+    try {
+      await window.ethereum.request({ method: "wallet_switchEthereumChain", params: [{ chainId: "0x" + EXPECTED_CHAIN_ID.toString(16) }] });
+      location.reload();   // tải lại để dùng mạng mới
+      return;
+    } catch (e) {
+      log("Ví đang ở chainId " + cur.chainId + ", cần chainId " + EXPECTED_CHAIN_ID + ". Hãy chuyển mạng thủ công trong MetaMask (" + reason(e) + ")", "err");
+      return;
+    }
+  }
+  signer = await provider.getSigner();                       // đối tượng ký giao dịch
+  account = await signer.getAddress();
+  const net = await provider.getNetwork();
+  $("who").textContent = "Ví: " + account + "  |  chainId: " + net.chainId;
+  window.ethereum.on && window.ethereum.on("accountsChanged", () => location.reload());
+  window.ethereum.on && window.ethereum.on("chainChanged", () => location.reload());
+  const saved = localStorage.getItem("invoiceAddr");
+  if (saved && !$("contractAddr").value) $("contractAddr").value = saved;
+  if ($("contractAddr").value) await loadContract();
+}
+
+async function loadContract() {
+  try {
+    if (!signer) return log("Hãy kết nối MetaMask trước.", "err");
+    const addr = $("contractAddr").value.trim();
+    if (!ethers.isAddress(addr)) return log("Địa chỉ contract không hợp lệ.", "err");
+    const code = await provider.getCode(addr);
+    if (code === "0x") return log("Không có contract nào ở địa chỉ này trên mạng hiện tại (sai mạng hoặc sai địa chỉ?).", "err");
+    contract = new ethers.Contract(addr, ABI, signer);        // Contract + signer = có thể gửi giao dịch
+    reader = READ_RPC ? new ethers.Contract(addr, ABI, new ethers.JsonRpcProvider(READ_RPC)) : null;
+    localStorage.setItem("invoiceAddr", addr);
+    const owner = await contract.owner();
+    const role = owner.toLowerCase() === account.toLowerCase() ? "DOANH NGHIỆP (owner)" : "ví khác (khách hàng / người xem)";
+    $("who").textContent = "Ví: " + account + "  |  vai trò: " + role + "  |  owner: " + owner;
+    await refresh();
+    log("Đã tải contract.", "good");
+  } catch (e) { log("Lỗi: " + reason(e), "err"); }
+}
+
+async function send(label, simFn, txPromiseFn) {
+  if (!contract) return log("Chưa tải contract.", "err");
+  try {
+    await simFn();                            // mô phỏng trước: nếu contract sẽ từ chối thì dừng ở đây
+    log(label + ": chờ bạn xác nhận trong MetaMask…");
+    const tx = await txPromiseFn();           // gửi giao dịch lên mạng
+    log(label + ": đã gửi (" + tx.hash + "), chờ đào khối…");
+    await tx.wait();                          // chờ giao dịch được đưa vào khối
+    log(label + ": THÀNH CÔNG\n" + tx.hash, "good");
+    await refresh();
+  } catch (e) { log(label + ": THẤT BẠI – " + reason(e), "err"); }
+}
+
+async function createInvoice() {
+  const id = BigInt($("cId").value), cust = $("cCustomer").value.trim();
+  let amount; try { amount = ethers.parseEther($("cAmount").value); } catch { return log("Số tiền không hợp lệ.", "err"); }
+  if (!ethers.isAddress(cust)) return log("Ví khách hàng không hợp lệ.", "err");
+  await send("Tạo hóa đơn", () => simulate("createInvoice", [id, cust, amount]), () => contract.createInvoice(id, cust, amount));
+}
+
+async function payInvoice() {
+  const id = BigInt($("pId").value);
+  let amount; try { amount = ethers.parseEther($("pAmount").value); } catch { return log("Số tiền không hợp lệ.", "err"); }
+  await send("Thanh toán", () => simulate("payInvoice", [id], { value: amount }), () => contract.payInvoice(id, { value: amount }));   // value = số ETH gửi kèm
+}
+
+async function query() {
+  try {
+    const id = BigInt($("qId").value);
+    const bal = await contract.getInvoiceBalance(id);
+    const paid = await contract.isInvoicePaid(id);
+    $("qOut").innerHTML = "Còn nợ: <b>" + eth(bal) + "</b> &nbsp; " + (paid ? '<span class="tag ok">Đã tất toán</span>' : '<span class="tag bad">Chưa tất toán</span>');
+  } catch (e) { $("qOut").innerHTML = '<span class="tag bad">' + reason(e) + "</span>"; }
+}
+
+async function refresh() {
+  if (!contract) return;
+  const ids = await contract.getInvoiceIds();
+  const rows = [];
+  for (const id of ids) {
+    const inv = await contract.getInvoice(id);
+    const pays = await contract.getPayments(id);
+    const payHtml = pays.length
+      ? '<ul class="pay">' + pays.map(p => "<li>" + eth(p.amount) + " – " + short(p.payer) + " – " + new Date(Number(p.timestamp) * 1000).toLocaleString("vi-VN") + "</li>").join("") + "</ul>"
+      : '<span style="color:var(--mute)">chưa có</span>';
+    rows.push("<tr><td><b>#" + id + '</b></td><td class="mono">' + short(inv.customer) + "</td><td>" + eth(inv.totalAmount) + "</td><td>" + eth(inv.paidAmount) +
+      "</td><td><b>" + eth(inv.remaining) + "</b></td><td>" + (inv.isPaid ? '<span class="tag ok">Đã tất toán</span>' : '<span class="tag bad">Còn nợ</span>') + "</td><td>" + payHtml + "</td></tr>");
+  }
+  $("tbody").innerHTML = rows.length ? rows.join("") : '<tr><td colspan="7" style="color:var(--mute)">Chưa có hóa đơn.</td></tr>';
+}
+
+$("btnConnect").onclick = connect;
+$("btnLoad").onclick = loadContract;
+$("btnCreate").onclick = createInvoice;
+$("btnPay").onclick = payInvoice;
+$("btnQuery").onclick = query;
+</script>
+</body>
+</html>
